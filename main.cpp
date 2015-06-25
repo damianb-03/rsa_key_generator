@@ -9,6 +9,10 @@
 #include <crypto++/base64.h>
 #include <crypto++/files.h>
 
+#include <crypto++/sha.h>
+#include <crypto++/hex.h>
+#include <crypto++/channels.h>
+
 using namespace CryptoPP;
 void ECDSAGenKeyPair(unsigned int keySize);
 
@@ -88,35 +92,35 @@ void ECDSASignFile(const std::string &filename) {
 	// load private key
 	ECDSA<ECP, SHA512>::PrivateKey privateKey;
 	ByteQueue bytes;
-	std::cout << "start load prv key" << std::endl;
+//	std::cout << "start load prv key" << std::endl;
 	FileSource prvKeyFile("key_1.prv", true, new Base64Decoder);
 	prvKeyFile.TransferTo(bytes);
 	bytes.MessageEnd();
- 	std::cout << "load bytes" << std::endl;
+//	std::cout << "load bytes" << std::endl;
 	privateKey.Load(bytes);
 	
 	//bytes.CopyTo(decoder);
-	std::cout << "end of load prv key" << std::endl;
-	std::cout << "validate prv key " << std::endl;
+//	std::cout << "end of load prv key" << std::endl;
+//	std::cout << "validate prv key " << std::endl;
 	if (privateKey.Validate(rng, 3) == false) {
 		std::cout << "prv key validate error";
 		return;
 	}
-	std::cout << "prv key validate OK" << std::endl;
+//	std::cout << "prv key validate OK" << std::endl;
 
-	std::cout << "start load clear file" << std::endl;
+//	std::cout << "start load clear file" << std::endl;
 	std::string strContents;
 	FileSource(filename.c_str(), true, new StringSink(strContents));
 	
 	ECDSA<ECP, SHA512>::Signer signer(privateKey);
 	SecByteBlock sbbSignature(signer.SignatureLength());
-	std::cout << "sign message" << std::endl;
+//	std::cout << "sign message" << std::endl;
 	signer.SignMessage(rng,
 		(byte const*) strContents.data(),
 		strContents.size(),
 		sbbSignature);
 	
-	std::cout << "Save result" << std::endl;
+//	std::cout << "Save result" << std::endl;
 	FileSink sinksig(std::string(filename + ".sig").c_str());
 	sinksig.Put(sbbSignature, sbbSignature.size());
 	sinksig.MessageSeriesEnd();
@@ -126,7 +130,7 @@ void ECDSAVerifyFile(const std::string &filename, const std::string &signatureFi
 	AutoSeededRandomPool rng;
 	// load pub key from file
 	std::string pubKeyFilename("key_1.pub");
-	std::cout << "load pub key form " << pubKeyFilename << std::endl;
+//	std::cout << "load pub key form " << pubKeyFilename << std::endl;
 	CryptoPP::ByteQueue bytes;
 	ECDSA<ECP, SHA512>::PublicKey publicKey;
 	FileSource file(pubKeyFilename.c_str(), true, new Base64Decoder);
@@ -137,34 +141,50 @@ void ECDSAVerifyFile(const std::string &filename, const std::string &signatureFi
 		std::cout << "pub key validate error";
 		return;
 	}
-	std::cout << "pub key validate OK" << std::endl;
+//	std::cout << "pub key validate OK" << std::endl;
 
 	std::string signature, clearData;
 	ECDSA<ECP, SHA512>::Verifier verifier(publicKey);
-	std::cout << "load clear text file " << filename << std::endl;
+//	std::cout << "load clear text file " << filename << std::endl;
 	FileSource(filename.c_str(), true, new StringSink(clearData));
-	std::cout << "load signature from file " << signatureFileName << std::endl;
+//	std::cout << "load signature from file " << signatureFileName << std::endl;
 	FileSource(signatureFileName.c_str(), true, new StringSink(signature));
 	std::string combined(clearData);
 	combined.append(signature);
-	std::cout << "start verify" << std::endl;
+//	std::cout << "start verify" << std::endl;
 	try {
 		StringSource(combined, true,
 			new SignatureVerificationFilter(verifier, NULL, SignatureVerificationFilter::THROW_EXCEPTION));
-		std::cout << "verify OK" << std::endl;
+//		std::cout << "verify OK" << std::endl;
 	}
 	catch (SignatureVerificationFilter::SignatureVerificationFailed &err) {
 		std::cout << "verify error " << err.what() << std::endl;
 	}
 }
 
-void test(unsigned int keySize, void (*f)(unsigned int)) {
-	const int numberOfTests = 5;
-	std::cout << "generate " << numberOfTests << " keys, size = " << keySize << std::endl;
-    std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
+std::string block_to_SHA512(const char *block, size_t block_size){
+	
+	std::string s1;//(block,block_size);
+	SHA512 sha512;
+	HashFilter HF(sha512, new HexEncoder(new StringSink(s1)));
+	ChannelSwitch cs;
+	cs.AddDefaultRoute(HF);
+	StringSource ss(std::string(block,block_size), true /*pumpAll*/, new Redirector(cs));
+	std::cout << "SHA-512: " << s1 << std::endl;
+	
+	return s1;
+}
+
+void test(void (*f)(unsigned int), unsigned int keySize = 0) {
+	const int numberOfTests = 100;
+	if(keySize != 0){
+		std::cout << "generate " << numberOfTests << " RSA keys, size = " << keySize << std::endl;
+	}
+	else{
+		std::cout << "generate " << numberOfTests << " ECDSA keys, type = secp521r1" << std::endl;
+	}
+	std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
 	for (int i = 0; i < numberOfTests; ++i) {
-		//GenKeyPair(keySize);
-		//ECDSAGenKeyPair(keySize);
 		f(keySize);
 	}
 	std::chrono::time_point<std::chrono::steady_clock> stop_time = std::chrono::steady_clock::now();
@@ -174,11 +194,12 @@ void test(unsigned int keySize, void (*f)(unsigned int)) {
 
 int main(int argc, char **argv) {
 	
-	//test(2048, GenKeyPair);
-	//test(4096, ECDSAGenKeyPair);
-	ECDSAGenKeyPair();
-	std::cout << "sign test.txt" << std::endl;
-	ECDSASignFile("test.txt");
-	ECDSAVerifyFile("test.txt", "test.txt.sig");
+	//test(GenKeyPair, 128);
+	//test(ECDSAGenKeyPair);
+	block_to_SHA512("haszuj_aletojesttylkotest",25);
+	//ECDSAGenKeyPair();
+	//std::cout << "sign test.txt" << std::endl;
+	//ECDSASignFile("test.txt");
+	//ECDSAVerifyFile("test.txt", "test.txt.sig");
     return 0;
 }
